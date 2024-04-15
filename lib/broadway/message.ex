@@ -50,6 +50,7 @@ defmodule Broadway.Message do
           batcher: atom,
           batch_key: term,
           batch_mode: :bulk | :flush,
+          weight: non_neg_integer,
           status:
             :ok
             | {:failed, reason :: term}
@@ -63,7 +64,8 @@ defmodule Broadway.Message do
             batcher: :default,
             batch_key: :default,
             batch_mode: :bulk,
-            status: :ok
+            status: :ok,
+            weight: 1
 
   @doc """
   Updates the data in the message.
