@@ -342,7 +342,15 @@ defmodule Broadway.Topology.ProducerStage do
   end
 
   defp reverse_split_demand([head | tail], demand, acc) do
-    reverse_split_demand(tail, demand - 1, [head | acc])
+    remaining_demand = demand - head.weight
+
+    if remaining_demand >= 0 do
+      reverse_split_demand(tail, remaining_demand, [head | acc])
+    else
+      # emitting head would overflow the demand, so put it back and
+      # set remaining demand to 0
+      reverse_split_demand([head | tail], 0, acc)
+    end
   end
 
   defp dequeue_many(queue, demand, acc) do
@@ -386,10 +394,22 @@ defmodule Broadway.Topology.ProducerStage do
       left when left > 0 ->
         {:open, messages, _to_buffer = []}
 
-      # We went over the rate limit, so we split (on negative index) the messages
-      # we were able to emit and close the rate limiting.
+      # We went over the rate limit, so we remove messages from the
+      # back of the list of those we were able to emit until the
+      # overflow is corrected and close the rate limiting.
       overflow when overflow < 0 ->
-        {emittable, to_buffer} = Enum.split(messages, overflow)
+        reversed = Enum.reverse(messages)
+
+        {emittable, to_buffer, _overflow} =
+          Enum.reduce_while(reversed, {reversed, [], overflow}, fn
+            message, {emittable, to_buffer, overflow} ->
+              if overflow >= 0 do
+                {:halt, {Enum.reverse(emittable), to_buffer, overflow}}
+              else
+                {:cont, {tl(emittable), [message | to_buffer], overflow + message.weight}}
+              end
+          end)
+
         {:closed, emittable, to_buffer}
     end
   end

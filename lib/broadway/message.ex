@@ -53,7 +53,8 @@ defmodule Broadway.Message do
           status:
             :ok
             | {:failed, reason :: term}
-            | {:throw | :error | :exit, term, Exception.stacktrace()}
+            | {:throw | :error | :exit, term, Exception.stacktrace()},
+          weight: non_neg_integer
         }
 
   @enforce_keys [:data, :acknowledger]
@@ -63,7 +64,8 @@ defmodule Broadway.Message do
             batcher: :default,
             batch_key: :default,
             batch_mode: :bulk,
-            status: :ok
+            status: :ok,
+            weight: 1
 
   @doc """
   Updates the data in the message.
