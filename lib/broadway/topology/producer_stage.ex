@@ -34,6 +34,19 @@ defmodule Broadway.Topology.ProducerStage do
     dispatcher = args[:dispatcher]
     rate_limiter = args[:rate_limiter]
 
+    max_message_weight = args[:broadway][:max_message_weight]
+    allowed_messages = get_in(args, [:broadway, :producer, :rate_limiting, :allowed_messages])
+
+    if not is_nil(allowed_messages) and allowed_messages < max_message_weight do
+      name = args[:broadway][:name]
+
+      error_message =
+        "Max message weight #{inspect(max_message_weight)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
+
+      IO.warn(error_message)
+      raise(error_message)
+    end
+
     # Inject the topology index only if the args are a keyword list.
     arg =
       if Keyword.keyword?(arg) do
@@ -339,9 +352,9 @@ defmodule Broadway.Topology.ProducerStage do
     case :queue.out(queue) do
       {{:value, message}, queue} ->
         if message.weight > demand do
-          new_queue = :queue.in_r(message, queue)
           # requeue first message and ignore remaining demand since
           # the next message would put us over the allowed weight
+          new_queue = :queue.in_r(message, queue)
           {0, Enum.reverse(acc), new_queue}
         else
           new_demand = demand - message.weight
