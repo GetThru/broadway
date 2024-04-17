@@ -411,22 +411,19 @@ defmodule Broadway.Topology.ProducerStage do
       left when left > 0 ->
         {:open, messages, _to_buffer = []}
 
-      # We went over the rate limit, so we split (on negative index) the messages
-      # we were able to emit and close the rate limiting.
-
-      # NOTE: we think this will work for concurrent producers, but we
-      # ourselves don't actually have any.
+      # We went over the rate limit, so we remove messages from the
+      # back of the list of those we were able to emit until the
+      # overflow is corrected and close the rate limiting.
       overflow when overflow < 0 ->
-        # {emittable, to_buffer} = Enum.split(messages, overflow)
         reversed = Enum.reverse(messages)
 
         {emittable, to_buffer, _overflow} =
-          Enum.reduce_while(reversed, {[], reversed, overflow}, fn
+          Enum.reduce_while(reversed, {reversed, [], overflow}, fn
             message, {emittable, to_buffer, overflow} ->
-              if overflow > 0 do
-                {:halt, {emittable, overflow}}
+              if overflow >= 0 do
+                {:halt, {Enum.reverse(emittable), to_buffer, overflow}}
               else
-                {:cont, {[message | emittable], tl(to_buffer), overflow + message.weight}}
+                {:cont, {tl(emittable), [message | to_buffer], overflow + message.weight}}
               end
           end)
 
