@@ -50,7 +50,7 @@ defmodule Broadway.Topology.ProducerStage do
           state: :open,
           draining?: false,
           rate_limiter: rate_limiter_ref,
-          # A queue of INDIVIDUAL messages that we buffered.
+          # A queue of messages that we buffered.
           message_buffer: :queue.new(),
           # A queue of demands (integers) that we buffered.
           demand_buffer: :queue.new()
@@ -333,43 +333,15 @@ defmodule Broadway.Topology.ProducerStage do
     {%{state | rate_limiting: rate_limiting}, messages_to_emit}
   end
 
-  # defp reverse_split_demand(rest, 0, acc) do
-  #   {0, acc, rest}
-  # end
-
-  # defp reverse_split_demand([], demand, acc) do
-  #   {demand, acc, []}
-  # end
-
-  # defp reverse_split_demand([head | tail], demand, acc) do
-  #   reverse_split_demand(tail, demand - 1, [head | acc])
-  # end
-
   defp dequeue_many(queue, 0, acc), do: {0, Enum.reverse(acc), queue}
 
   defp dequeue_many(queue, demand, acc) do
-    # case :queue.out(queue) do
-    #   {{:value, list}, queue} ->
-    #     case reverse_split_demand(list, demand, acc) do
-    #       {0, acc, []} ->
-    #         {0, Enum.reverse(acc), queue}
-
-    #       {0, acc, rest} ->
-    #         {0, Enum.reverse(acc), :queue.in_r(rest, queue)}
-
-    #       {demand, acc, []} ->
-    #         dequeue_many(queue, demand, acc)
-    #     end
-
-    #   {:empty, queue} ->
-    #     {demand, Enum.reverse(acc), queue}
-    # end
     case :queue.out(queue) do
       {{:value, message}, queue} ->
         if message.weight > demand do
           new_queue = :queue.in_r(message, queue)
-          # ignore remaining demand since message at head of queue is
-          # too chunky to send
+          # requeue first message and ignore remaining demand since
+          # the next message would put us over the allowed weight
           {0, Enum.reverse(acc), new_queue}
         else
           new_demand = demand - message.weight
@@ -384,14 +356,12 @@ defmodule Broadway.Topology.ProducerStage do
   defp enqueue_batch(queue, _list = []), do: queue
 
   defp enqueue_batch(queue, list) do
-    # :queue.in(list, queue)
     :queue.join(queue, :queue.from_list(list))
   end
 
   defp enqueue_batch_r(queue, _list = []), do: queue
 
   defp enqueue_batch_r(queue, list) do
-    # :queue.in_r(list, queue)
     :queue.join(:queue.from_list(list), queue)
   end
 
