@@ -50,7 +50,7 @@ defmodule Broadway.Message do
           batcher: atom,
           batch_key: term,
           batch_mode: :bulk | :flush,
-          weight: non_neg_integer,
+          weight: pos_integer,
           status:
             :ok
             | {:failed, reason :: term}

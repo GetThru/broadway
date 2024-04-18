@@ -20,14 +20,14 @@ defmodule Broadway.Options do
     ],
     max_restarts: [type: :non_neg_integer, default: 3],
     max_seconds: [type: :pos_integer, default: 5],
-    max_message_weight: [
+    min_rate_limit: [
       type: :pos_integer,
       default: 1,
       doc: """
       Optional. When using variable message weights, specifies the
       largest weight allowed by your data model. Producers will raise
       at runtime if given a rate limit that is lower than the
-      max_message_weight.
+      min_rate_limit.
       """
     ],
     resubscribe_interval: [

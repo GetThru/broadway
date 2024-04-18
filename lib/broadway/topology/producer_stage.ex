@@ -34,14 +34,14 @@ defmodule Broadway.Topology.ProducerStage do
     dispatcher = args[:dispatcher]
     rate_limiter = args[:rate_limiter]
 
-    max_message_weight = args[:broadway][:max_message_weight]
+    min_rate_limit = args[:broadway][:min_rate_limit]
     allowed_messages = get_in(args, [:broadway, :producer, :rate_limiting, :allowed_messages])
 
-    if not is_nil(allowed_messages) and allowed_messages < max_message_weight do
+    if not is_nil(allowed_messages) and allowed_messages < min_rate_limit do
       name = args[:broadway][:name]
 
       error_message =
-        "Max message weight #{inspect(max_message_weight)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
+        "Minimum rate limit #{inspect(min_rate_limit)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
 
       IO.warn(error_message)
       raise(error_message)

@@ -15,7 +15,8 @@ defmodule Broadway.Topology.RateLimiter do
       rate_limiting_opts ->
         name = Keyword.fetch!(opts, :name)
         producers_names = Keyword.fetch!(opts, :producers_names)
-        args = {rate_limiting_opts, producers_names}
+        min_rate_limit = Keyword.fetch!(opts, :min_rate_limit)
+        args = {rate_limiting_opts, producers_names, min_rate_limit}
         GenServer.start_link(__MODULE__, args, name: name)
     end
   end
@@ -42,7 +43,7 @@ defmodule Broadway.Topology.RateLimiter do
   end
 
   @impl true
-  def init({rate_limiting_opts, producers_names}) do
+  def init({rate_limiting_opts, producers_names, min_rate_limit}) do
     interval = Keyword.fetch!(rate_limiting_opts, :interval)
     allowed = Keyword.fetch!(rate_limiting_opts, :allowed_messages)
 
@@ -56,7 +57,8 @@ defmodule Broadway.Topology.RateLimiter do
       allowed: allowed,
       producers_names: producers_names,
       counter: counter,
-      reset_timer: timer
+      reset_timer: timer,
+      min_rate_limit: min_rate_limit
     }
 
     {:ok, state}
@@ -64,9 +66,22 @@ defmodule Broadway.Topology.RateLimiter do
 
   @impl true
   def handle_call({:update_rate_limiting, opts}, _from, state) do
-    %{interval: interval, allowed: allowed, reset_timer: prev_timer} = state
+    %{
+      interval: interval,
+      allowed: allowed,
+      reset_timer: prev_timer,
+      min_rate_limit: min_rate_limit
+    } = state
+
     new_interval = Keyword.get(opts, :interval, interval)
     new_allowed = Keyword.get(opts, :allowed_messages, allowed)
+
+    new_allowed =
+      if new_allowed < min_rate_limit do
+        min_rate_limit
+      else
+        new_allowed
+      end
 
     state = %{state | interval: new_interval, allowed: new_allowed}
 
