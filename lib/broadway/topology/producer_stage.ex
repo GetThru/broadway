@@ -5,6 +5,8 @@ defmodule Broadway.Topology.ProducerStage do
   alias Broadway.Message
   alias Broadway.Topology.RateLimiter
 
+  require Logger
+
   @spec start_link(term, non_neg_integer, GenServer.options()) :: GenServer.on_start()
   def start_link(args, index, opts \\ []) do
     GenStage.start_link(__MODULE__, {args, index}, opts)
@@ -43,7 +45,7 @@ defmodule Broadway.Topology.ProducerStage do
       error_message =
         "Minimum rate limit #{inspect(min_rate_limit)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
 
-      IO.warn(error_message)
+      Logger.warning(error_message)
     end
 
     # Inject the topology index only if the args are a keyword list.
