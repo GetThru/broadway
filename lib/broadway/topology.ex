@@ -121,12 +121,13 @@ defmodule Broadway.Topology do
   end
 
   defp start_supervisor(child_specs, config, opts) do
+    min_rate_limit = Keyword.fetch!(opts, :min_rate_limit)
     {producers_names, producers_specs} = build_producers_specs(config, opts)
     {processors_names, processors_specs} = build_processors_specs(config, producers_names)
 
     children =
       [
-        build_rate_limiter_spec(config, producers_names),
+        build_rate_limiter_spec(config, producers_names, min_rate_limit),
         build_producer_supervisor_spec(config, producers_specs),
         build_processor_supervisor_spec(config, processors_specs)
       ] ++
@@ -194,13 +195,14 @@ defmodule Broadway.Topology do
     [name: name] ++ Keyword.take(config, [:spawn_opt, :hibernate_after])
   end
 
-  defp build_rate_limiter_spec(config, producers_names) do
+  defp build_rate_limiter_spec(config, producers_names, min_rate_limit) do
     %{producer_config: producer_config} = config
 
     opts = [
       name: process_name(config, "RateLimiter"),
       rate_limiting: producer_config[:rate_limiting],
-      producers_names: producers_names
+      producers_names: producers_names,
+      min_rate_limit: min_rate_limit
     ]
 
     {RateLimiter, opts}

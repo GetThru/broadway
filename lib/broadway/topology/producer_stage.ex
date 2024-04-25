@@ -34,6 +34,18 @@ defmodule Broadway.Topology.ProducerStage do
     dispatcher = args[:dispatcher]
     rate_limiter = args[:rate_limiter]
 
+    min_rate_limit = args[:broadway][:min_rate_limit]
+    allowed_messages = get_in(args, [:broadway, :producer, :rate_limiting, :allowed_messages])
+
+    if not is_nil(allowed_messages) and allowed_messages < min_rate_limit do
+      name = args[:broadway][:name]
+
+      error_message =
+        "Minimum rate limit #{inspect(min_rate_limit)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
+
+      IO.warn(error_message)
+    end
+
     # Inject the topology index only if the args are a keyword list.
     arg =
       if Keyword.keyword?(arg) do
@@ -50,7 +62,7 @@ defmodule Broadway.Topology.ProducerStage do
           state: :open,
           draining?: false,
           rate_limiter: rate_limiter_ref,
-          # A queue of "batches" of messages that we buffered.
+          # A queue of messages that we buffered.
           message_buffer: :queue.new(),
           # A queue of demands (integers) that we buffered.
           demand_buffer: :queue.new()
@@ -312,7 +324,7 @@ defmodule Broadway.Topology.ProducerStage do
             rate_limit_messages(
               rate_limiter,
               probably_emittable,
-              _probably_emittable_count = allowed - allowed_left
+              _probably_emittable_weight = allowed - allowed_left
             )
 
           new_buffer = enqueue_batch_r(buffer, messages_to_buffer)
@@ -333,30 +345,19 @@ defmodule Broadway.Topology.ProducerStage do
     {%{state | rate_limiting: rate_limiting}, messages_to_emit}
   end
 
-  defp reverse_split_demand(rest, 0, acc) do
-    {0, acc, rest}
-  end
-
-  defp reverse_split_demand([], demand, acc) do
-    {demand, acc, []}
-  end
-
-  defp reverse_split_demand([head | tail], demand, acc) do
-    reverse_split_demand(tail, demand - 1, [head | acc])
-  end
+  defp dequeue_many(queue, 0, acc), do: {0, Enum.reverse(acc), queue}
 
   defp dequeue_many(queue, demand, acc) do
     case :queue.out(queue) do
-      {{:value, list}, queue} ->
-        case reverse_split_demand(list, demand, acc) do
-          {0, acc, []} ->
-            {0, Enum.reverse(acc), queue}
-
-          {0, acc, rest} ->
-            {0, Enum.reverse(acc), :queue.in_r(rest, queue)}
-
-          {demand, acc, []} ->
-            dequeue_many(queue, demand, acc)
+      {{:value, message}, queue} ->
+        if message.weight > demand do
+          # requeue first message and ignore remaining demand since
+          # the next message would put us over the allowed weight
+          new_queue = :queue.in_r(message, queue)
+          {0, Enum.reverse(acc), new_queue}
+        else
+          new_demand = demand - message.weight
+          dequeue_many(queue, new_demand, [message | acc])
         end
 
       {:empty, queue} ->
@@ -365,17 +366,23 @@ defmodule Broadway.Topology.ProducerStage do
   end
 
   defp enqueue_batch(queue, _list = []), do: queue
-  defp enqueue_batch(queue, list), do: :queue.in(list, queue)
+
+  defp enqueue_batch(queue, list) do
+    :queue.join(queue, :queue.from_list(list))
+  end
 
   defp enqueue_batch_r(queue, _list = []), do: queue
-  defp enqueue_batch_r(queue, list), do: :queue.in_r(list, queue)
+
+  defp enqueue_batch_r(queue, list) do
+    :queue.join(:queue.from_list(list), queue)
+  end
 
   defp rate_limit_messages(_state, [], _count) do
     {:open, [], []}
   end
 
-  defp rate_limit_messages(rate_limiter, messages, message_count) do
-    case RateLimiter.rate_limit(rate_limiter, message_count) do
+  defp rate_limit_messages(rate_limiter, messages, demand) do
+    case RateLimiter.rate_limit(rate_limiter, demand) do
       # If no more messages are allowed, we're rate limited but we're able
       # to emit all messages that we have.
       0 ->
@@ -386,10 +393,22 @@ defmodule Broadway.Topology.ProducerStage do
       left when left > 0 ->
         {:open, messages, _to_buffer = []}
 
-      # We went over the rate limit, so we split (on negative index) the messages
-      # we were able to emit and close the rate limiting.
+      # We went over the rate limit, so we remove messages from the
+      # back of the list of those we were able to emit until the
+      # overflow is corrected and close the rate limiting.
       overflow when overflow < 0 ->
-        {emittable, to_buffer} = Enum.split(messages, overflow)
+        reversed = Enum.reverse(messages)
+
+        {emittable, to_buffer, _overflow} =
+          Enum.reduce_while(reversed, {reversed, [], overflow}, fn
+            message, {emittable, to_buffer, overflow} ->
+              if overflow >= 0 do
+                {:halt, {Enum.reverse(emittable), to_buffer, overflow}}
+              else
+                {:cont, {tl(emittable), [message | to_buffer], overflow + message.weight}}
+              end
+          end)
+
         {:closed, emittable, to_buffer}
     end
   end
