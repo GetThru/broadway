@@ -38,6 +38,7 @@ defmodule Broadway.Topology.ProducerStage do
 
     min_rate_limit = args[:broadway][:min_rate_limit]
     allowed_messages = get_in(args, [:broadway, :producer, :rate_limiting, :allowed_messages])
+
     if not is_nil(allowed_messages) and allowed_messages < min_rate_limit do
       name = args[:broadway][:name]
 
