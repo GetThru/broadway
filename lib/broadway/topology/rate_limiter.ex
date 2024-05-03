@@ -47,6 +47,8 @@ defmodule Broadway.Topology.RateLimiter do
     interval = Keyword.fetch!(rate_limiting_opts, :interval)
     allowed = Keyword.fetch!(rate_limiting_opts, :allowed_messages)
 
+    {allowed, interval} = adjust_rate_limit_against_minimum(allowed, interval, min_rate_limit)
+
     counter = :atomics.new(@atomics_index, [])
     :atomics.put(counter, @atomics_index, allowed)
 
@@ -73,15 +75,11 @@ defmodule Broadway.Topology.RateLimiter do
       min_rate_limit: min_rate_limit
     } = state
 
-    new_interval = Keyword.get(opts, :interval, interval)
     new_allowed = Keyword.get(opts, :allowed_messages, allowed)
+    new_interval = Keyword.get(opts, :interval, interval)
 
-    new_allowed =
-      if new_allowed < min_rate_limit do
-        min_rate_limit
-      else
-        new_allowed
-      end
+    {new_allowed, new_interval} =
+      adjust_rate_limit_against_minimum(new_allowed, new_interval, min_rate_limit)
 
     state = %{state | interval: new_interval, allowed: new_allowed}
 
@@ -137,4 +135,12 @@ defmodule Broadway.Topology.RateLimiter do
         :ok
     end
   end
+
+  defp adjust_rate_limit_against_minimum(allowed, interval, minimum) when minimum > allowed do
+    ratio = allowed / minimum
+    increased_interval = ceil(interval / ratio)
+    {minimum, increased_interval}
+  end
+
+  defp adjust_rate_limit_against_minimum(allowed, interval, _minimum), do: {allowed, interval}
 end

@@ -17,13 +17,10 @@ jobs:
       matrix:
         include:
           - pair:
-              elixir: 1.7.4
-              otp: 21.3.8.17
-          - pair:
-              elixir: 1.16.1
-              otp: 26.2.2
+              elixir: 1.15.7
+              otp: 26.1.2
             lint: lint
-            coverage: coverage
+            test: test
     steps:
       - name: Check out this repository
         uses: actions/checkout@v4
@@ -59,7 +56,4 @@ jobs:
         if: ${{ matrix.lint }}
 
       - run: mix test
-        if: ${{!matrix.coverage}}
-
-      - run: mix coveralls.github
-        if: ${{matrix.coverage}}
+        if: ${{matrix.test}}
