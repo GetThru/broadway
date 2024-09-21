@@ -45,7 +45,7 @@ defmodule Broadway.Topology.ProducerStage do
       error_message =
         "Minimum rate limit #{inspect(min_rate_limit)} too low for rate limiting allowed messages: #{inspect(allowed_messages)} given to #{inspect(name)}"
 
-      Logger.warning(error_message)
+      Logger.debug(error_message)
     end
 
     # Inject the topology index only if the args are a keyword list.
