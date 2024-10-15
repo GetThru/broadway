@@ -307,13 +307,14 @@ defmodule Broadway.Topology.ProducerStage do
 
   defp rate_limit_and_buffer_messages(%{rate_limiting: rate_limiting} = state) do
     %{message_buffer: buffer, rate_limiter: rate_limiter, draining?: draining?} = rate_limiting
-    dbg(state)
+    # dbg(state)
 
     {rate_limiting, messages_to_emit} =
       case RateLimiter.get_currently_allowed(rate_limiter) do
         # No point in trying to emit messages if no messages are allowed. In that case,
         # we close the rate limiting and don't emit anything.
         allowed when allowed <= 0 ->
+          Utility.maybe_log("Rate limiting closed", state)
           {%{rate_limiting | state: :closed}, []}
 
         allowed ->
