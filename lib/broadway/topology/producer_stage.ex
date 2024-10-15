@@ -4,6 +4,7 @@ defmodule Broadway.Topology.ProducerStage do
 
   alias Broadway.Message
   alias Broadway.Topology.RateLimiter
+  alias Broadway.Utility
 
   require Logger
 
@@ -121,6 +122,7 @@ defmodule Broadway.Topology.ProducerStage do
   end
 
   def handle_call(message, from, state) do
+    dbg({message, from, state})
     %{module: module, module_state: module_state} = state
 
     message
@@ -305,6 +307,7 @@ defmodule Broadway.Topology.ProducerStage do
 
   defp rate_limit_and_buffer_messages(%{rate_limiting: rate_limiting} = state) do
     %{message_buffer: buffer, rate_limiter: rate_limiter, draining?: draining?} = rate_limiting
+    dbg(state)
 
     {rate_limiting, messages_to_emit} =
       case RateLimiter.get_currently_allowed(rate_limiter) do
@@ -341,11 +344,22 @@ defmodule Broadway.Topology.ProducerStage do
     {%{state | rate_limiting: rate_limiting}, messages_to_emit}
   end
 
+  # queue is an Erlang queue
+  # demand is how many messages rate limiting is allowing
+  # acc is the messages pulled off the queue
+  #
+  # returns {allowed_left, probably_emittable, buffer}
+  # allowed_left is how much of the demand remands
+  # probably_emittable is the messages pulled off the queue that we can probably process
+  # buffer is the remaining queue
   defp dequeue_many(queue, 0, acc), do: {0, Enum.reverse(acc), queue}
 
   defp dequeue_many(queue, demand, acc) do
+    # Take the first message off the queue
     case :queue.out(queue) do
+      # The queue had at least one message
       {{:value, message}, queue} ->
+        # There isn't enough rate limit left for this message
         if message.weight > demand do
           # requeue first message and ignore remaining demand since
           # the next message would put us over the allowed weight
