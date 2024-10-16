@@ -422,8 +422,11 @@ defmodule Broadway.Topology.ProducerStage do
     Utility.maybe_log("Remaining rate limit: #{left}", state)
 
     cond do
-      messages == [] ->
+      messages == [] and next_message_weight == 0 ->
         {:open, [], []}
+
+      messages == [] ->
+        {:closed, [], []}
 
       # If no more messages are allowed, we're rate limited but we're able
       # to emit all messages that we have.
