@@ -337,7 +337,7 @@ defmodule Broadway.Topology.ProducerStage do
             )
 
           rate_limiting_map = %{
-            rate_limiting_stage: rate_limiting_state,
+            rate_limiting_state: rate_limiting_state,
             emit_count: length(messages_to_emit),
             to_buffer_count: length(messages_to_buffer)
           }
