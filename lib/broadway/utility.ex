@@ -2,8 +2,8 @@ defmodule Broadway.Utility do
   require Logger
 
   @queues [
-    "text.carrier.tmobile.tcr_campaign.1.sms.messages",
-    "text.provider.bandwidth.sms.messages"
+    "text.carrier.tmobile.tcr_campaign.1.sms.messages"
+    # "text.provider.bandwidth.sms.messages"
   ]
 
   def maybe_log(message, %{context: %{config: %{queue: queue}}})

@@ -122,7 +122,6 @@ defmodule Broadway.Topology.ProducerStage do
   end
 
   def handle_call(message, from, state) do
-    dbg({message, from, state})
     %{module: module, module_state: module_state} = state
 
     message
@@ -307,7 +306,6 @@ defmodule Broadway.Topology.ProducerStage do
 
   defp rate_limit_and_buffer_messages(%{rate_limiting: rate_limiting} = state) do
     %{message_buffer: buffer, rate_limiter: rate_limiter, draining?: draining?} = rate_limiting
-    # dbg(state)
 
     {rate_limiting, messages_to_emit} =
       case RateLimiter.get_currently_allowed(rate_limiter) do
@@ -320,12 +318,31 @@ defmodule Broadway.Topology.ProducerStage do
         allowed ->
           {allowed_left, probably_emittable, buffer} = dequeue_many(buffer, allowed, [])
 
+          log_map = %{
+            initial_allowed: allowed,
+            allowed_left: allowed_left,
+            probably_emittable_count: length(probably_emittable),
+            buffer_length: :queue.len(buffer)
+          }
+
+          Utility.maybe_log("dequeue_many result: #{inspect(log_map)}", state)
+
+          # This seems suspicious. Are we confirming that the rate limit is still valid?
+          # That nothing has changed?
           {rate_limiting_state, messages_to_emit, messages_to_buffer} =
             rate_limit_messages(
               rate_limiter,
               probably_emittable,
               _probably_emittable_weight = allowed - allowed_left
             )
+
+          rate_limiting_map = %{
+            rate_limiting_stage: rate_limiting_state,
+            emit_count: length(messages_to_emit),
+            to_buffer_count: length(messages_to_buffer)
+          }
+
+          Utility.maybe_log("rate_limit_messages result: #{inspect(rate_limiting_map)}", state)
 
           new_buffer = enqueue_batch_r(buffer, messages_to_buffer)
 
@@ -346,7 +363,7 @@ defmodule Broadway.Topology.ProducerStage do
   end
 
   # queue is an Erlang queue
-  # demand is how many messages rate limiting is allowing
+  # demand is how many segments rate limiting is allowing
   # acc is the messages pulled off the queue
   #
   # returns {allowed_left, probably_emittable, buffer}
