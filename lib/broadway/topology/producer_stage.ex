@@ -405,10 +405,6 @@ defmodule Broadway.Topology.ProducerStage do
     :queue.join(:queue.from_list(list), queue)
   end
 
-  defp rate_limit_messages(_rate_limiter, [], _count, _state) do
-    {:open, [], []}
-  end
-
   defp rate_limit_messages(rate_limiter, messages, demand, state) do
     left = RateLimiter.rate_limit(rate_limiter, demand)
     Utility.maybe_log("Remaining rate limit: #{left}", state)
