@@ -22,7 +22,7 @@ defmodule Broadway.Topology.RateLimiter do
   end
 
   def rate_limit(counter, amount)
-      when is_reference(counter) and is_integer(amount) and amount > 0 do
+      when is_reference(counter) and is_integer(amount) and amount >= 0 do
     :atomics.sub_get(counter, @atomics_index, amount)
   end
 

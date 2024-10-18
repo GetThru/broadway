@@ -3,7 +3,7 @@ defmodule Broadway.Topology.ProcessorStage do
   use GenStage
 
   require Logger
-  alias Broadway.{Message, Acknowledger}
+  alias Broadway.{Message, Acknowledger, Utility}
 
   @spec start_link(term, GenServer.options()) :: GenServer.on_start()
   def start_link(args, stage_options) do
@@ -70,6 +70,7 @@ defmodule Broadway.Topology.ProcessorStage do
         producer: state.producer
       },
       fn ->
+        Utility.maybe_log("Preparing to process #{length(messages)} message(s)", state)
         {prepared_messages, prepared_failed_messages} = maybe_prepare_messages(messages, state)
         {successful_messages, failed_messages} = handle_messages(prepared_messages, [], [], state)
         failed_messages = prepared_failed_messages ++ failed_messages
@@ -83,6 +84,15 @@ defmodule Broadway.Topology.ProcessorStage do
               {successful_messages, []}
           end
 
+        Utility.maybe_log(
+          inspect(%{
+            to_ack_count: length(successful_messages_to_ack),
+            to_forward_count: length(successful_messages_to_forward),
+            failed_count: length(failed_messages)
+          }),
+          state
+        )
+
         failed_messages =
           Acknowledger.maybe_handle_failed_messages(
             failed_messages,
@@ -92,6 +102,7 @@ defmodule Broadway.Topology.ProcessorStage do
 
         try do
           Acknowledger.ack_messages(successful_messages_to_ack, failed_messages)
+          Utility.maybe_log("Acked all messages", state)
         catch
           kind, reason ->
             Logger.error(Exception.format(kind, reason, __STACKTRACE__),

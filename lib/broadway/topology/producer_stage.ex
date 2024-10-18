@@ -4,6 +4,7 @@ defmodule Broadway.Topology.ProducerStage do
 
   alias Broadway.Message
   alias Broadway.Topology.RateLimiter
+  alias Broadway.Utility
 
   require Logger
 
@@ -19,12 +20,6 @@ defmodule Broadway.Topology.ProducerStage do
 
   @spec drain(GenServer.server()) :: :ok
   def drain(producer) do
-    # First we set the demand to accumulate. This is to avoid
-    # polling implementations from re-entering the polling loop
-    # once they flush any timers during draining. Push implementations
-    # will still empty out their queues as long as they put them
-    # in the GenStage buffer.
-    GenStage.demand(producer, :accumulate)
     GenStage.cast(producer, {__MODULE__, :prepare_for_draining})
     GenStage.async_info(producer, {__MODULE__, :cancel_consumers})
   end
@@ -317,17 +312,47 @@ defmodule Broadway.Topology.ProducerStage do
         # No point in trying to emit messages if no messages are allowed. In that case,
         # we close the rate limiting and don't emit anything.
         allowed when allowed <= 0 ->
+          Utility.maybe_log("Rate limiting closed", state)
           {%{rate_limiting | state: :closed}, []}
 
         allowed ->
-          {allowed_left, probably_emittable, buffer} = dequeue_many(buffer, allowed, [])
+          {allowed_left, probably_emittable, buffer, next_message_weight} =
+            dequeue_many(buffer, allowed, [])
+
+          log_map = %{
+            initial_allowed: allowed,
+            allowed_left: allowed_left,
+            probably_emittable_count: length(probably_emittable),
+            buffer_length: :queue.len(buffer),
+            next_message_weight: next_message_weight
+          }
+
+          Utility.maybe_log("dequeue_many result: #{inspect(log_map)}", state)
+
+          # If nothing was emittable, but the buffer has messages in it,
+          # then we want to rate limit allowed_left. This will take the limit
+          # down to 0.
+          demand =
+            case {length(probably_emittable), :queue.len(buffer)} do
+              {0, buffer_length} when buffer_length > 0 -> allowed_left
+              _ -> allowed - allowed_left
+            end
 
           {rate_limiting_state, messages_to_emit, messages_to_buffer} =
             rate_limit_messages(
               rate_limiter,
               probably_emittable,
-              _probably_emittable_weight = allowed - allowed_left
+              demand,
+              state
             )
+
+          rate_limiting_map = %{
+            rate_limiting_state: rate_limiting_state,
+            emit_count: length(messages_to_emit),
+            to_buffer_count: length(messages_to_buffer)
+          }
+
+          Utility.maybe_log("rate_limit_messages result: #{inspect(rate_limiting_map)}", state)
 
           new_buffer = enqueue_batch_r(buffer, messages_to_buffer)
 
@@ -338,6 +363,7 @@ defmodule Broadway.Topology.ProducerStage do
           }
 
           if draining? and :queue.is_empty(new_buffer) do
+            Utility.maybe_log("Cancelling consumers", state)
             cancel_consumers(state)
           end
 
@@ -347,7 +373,7 @@ defmodule Broadway.Topology.ProducerStage do
     {%{state | rate_limiting: rate_limiting}, messages_to_emit}
   end
 
-  defp dequeue_many(queue, 0, acc), do: {0, Enum.reverse(acc), queue}
+  defp dequeue_many(queue, 0, acc), do: {0, Enum.reverse(acc), queue, 0}
 
   defp dequeue_many(queue, demand, acc) do
     case :queue.out(queue) do
@@ -356,14 +382,14 @@ defmodule Broadway.Topology.ProducerStage do
           # requeue first message and ignore remaining demand since
           # the next message would put us over the allowed weight
           new_queue = :queue.in_r(message, queue)
-          {0, Enum.reverse(acc), new_queue}
+          {demand, Enum.reverse(acc), new_queue, message.weight}
         else
           new_demand = demand - message.weight
           dequeue_many(queue, new_demand, [message | acc])
         end
 
       {:empty, queue} ->
-        {demand, Enum.reverse(acc), queue}
+        {demand, Enum.reverse(acc), queue, 0}
     end
   end
 
@@ -379,12 +405,11 @@ defmodule Broadway.Topology.ProducerStage do
     :queue.join(:queue.from_list(list), queue)
   end
 
-  defp rate_limit_messages(_state, [], _count) do
-    {:open, [], []}
-  end
+  defp rate_limit_messages(rate_limiter, messages, demand, state) do
+    left = RateLimiter.rate_limit(rate_limiter, demand)
+    Utility.maybe_log("Remaining rate limit: #{left}", state)
 
-  defp rate_limit_messages(rate_limiter, messages, demand) do
-    case RateLimiter.rate_limit(rate_limiter, demand) do
+    case left do
       # If no more messages are allowed, we're rate limited but we're able
       # to emit all messages that we have.
       0 ->
